@@ -2,16 +2,6 @@ require 'fileutils'
 require 'sequel'
 
 module RBak
-  module BackupModel
-    def new(*args)
-      initialize(*args)
-    end
-
-    def initialize
-
-    end
-  end
-
   module Helpers
     def base_path
       '.rbak'
@@ -21,7 +11,7 @@ module RBak
       path_to 'HEAD'
     end
 
-    def head
+    def head!
       File.read(head_path).to_i
     end
 
@@ -43,6 +33,7 @@ module RBak
         primary_key :number, default: 1
         Time :created, null: false
         String :message, null: true
+        Integer :parent, null: true
       end
       RBak.const_set :Backup, conn[:backups]
       # Backup.class.instance_eval { include BackupModel }
@@ -53,8 +44,8 @@ module RBak
     include Helpers
 
     def backup(m = nil)
-      num = Backup.insert created: Time.now, message: m
-      files = Dir.foreach('.').reject { |f| ['.', '..', base_path].include? f }
+      num = Backup.insert created: Time.now, message: m, parent: head!
+      files = Dir.foreach('.').reject { |f| ['.', '..', '.git', base_path].include? f }
 
       FileUtils.mkdir_p path_to(num)
       files.each do |f|
@@ -87,9 +78,19 @@ module RBak
         num = Backup.order(:number).last[:number]
         checkout num
         write_head! num
+      when 'status'
+        puts "Backup #{head!} is currently checked out."
+      when 'log'
+        Backup.order(:number).all.reverse.each do |b|
+          puts "Backup #{b[:number]} => #{b[:message] or "<NO MESSAGE>"} (#{b[:created]})"
+        end
+      when 'diff'
+        lhs = path_to ARGV[1]
+        rhs = (ARGV[2] and path_to ARGV[2]) || '.'
+        puts `diff #{lhs} #{rhs}`
       else
         puts "Usage: rbak COMMAND"
-        puts "Valid commands: 'backup', 'checkout', 'latest', 'log'"
+        puts "Valid commands: 'backup', 'checkout', 'latest', 'status', 'log'"
       end
     end
   end
