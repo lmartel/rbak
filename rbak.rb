@@ -24,19 +24,20 @@ module RBak
     end
   end
 
-  class DB
-    include Helpers
+  module DB
+    class << self
+      include Helpers
 
-    def initialize(filename)
-      conn = Sequel.sqlite path_to(filename)
-      conn.create_table? :backups do
-        primary_key :number, default: 1
-        Time :created, null: false
-        String :message, null: true
-        Integer :parent, null: true
+      def init(filename)
+        conn = Sequel.sqlite path_to(filename)
+        conn.create_table? :backups do
+          primary_key :number, default: 1
+          Time :created, null: false
+          String :message, null: true
+          Integer :parent, null: true
+        end
+        RBak.const_set :Backup, conn[:backups]
       end
-      RBak.const_set :Backup, conn[:backups]
-      # Backup.class.instance_eval { include BackupModel }
     end
   end
 
@@ -60,7 +61,39 @@ module RBak
 
     def setup
       FileUtils.mkdir_p base_path
-      @DB = DB.new 'backups.db'
+      DB.init 'backups.db'
+    end
+
+    def status
+      puts "Backup #{head!} is currently checked out."
+    end
+
+    def log
+      backups = Backup.order(:number).all.reverse
+      groups = []
+      until backups.empty?
+        latest = backups.shift
+        parent = latest[:parent]
+        ancestor_numbers = []
+        while parent
+          ancestor_numbers << parent
+          parent = Backup[number: parent][:parent]
+        end
+
+        ancestors, other = backups.partition { |bu| ancestor_numbers.include? bu[:number] }
+        groups << [latest, *ancestors]
+        backups = other
+      end
+
+      puts groups.map { |group|
+        group.map { |b|
+          "Backup #{b[:number]} <= #{b[:parent] or 'ROOT'} :: #{b[:message] or "<NO MESSAGE>"} (#{b[:created]})"
+        }.join("\n")
+      }.join("\n\n")
+    end
+
+    def diff(lhs, rhs)
+      puts `diff #{lhs} #{rhs}`
     end
 
     def main
@@ -79,39 +112,19 @@ module RBak
         checkout num
         write_head! num
       when 'status'
-        puts "Backup #{head!} is currently checked out."
+        status
       when 'log'
-        backups = Backup.order(:number).all.reverse
-        groups = []
-        until backups.empty?
-          latest = backups.shift
-          parent = latest[:parent]
-          ancestor_numbers = []
-          while parent
-            ancestor_numbers << parent
-            parent = Backup[number: parent][:parent]
-          end
-
-          ancestors, other = backups.partition { |bu| ancestor_numbers.include? bu[:number] }
-          groups << [latest, *ancestors]
-          backups = other
-        end
-        puts groups.map { |group|
-          group.map { |b|
-            "Backup #{b[:number]} <= #{b[:parent] or 'ROOT'} :: #{b[:message] or "<NO MESSAGE>"} (#{b[:created]})"
-          }.join("\n")
-        }.join("\n\n")
+        log
       when 'diff'
         lhs = path_to ARGV[1]
         rhs = (ARGV[2] and path_to ARGV[2]) || '.'
-        puts `diff #{lhs} #{rhs}`
+        diff lhs, rhs
       else
         puts "Usage: rbak COMMAND"
         puts "Valid commands: 'backup', 'checkout', 'latest', 'status', 'log'"
       end
     end
   end
-
 end
 
 RBak::Main.new.main
