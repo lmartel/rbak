@@ -12,7 +12,7 @@ module RBak
     end
 
     def head!
-      File.read(head_path).to_i
+      File.read(head_path).to_i if File.exist?(head_path)
     end
 
     def write_head!(num)
@@ -81,9 +81,26 @@ module RBak
       when 'status'
         puts "Backup #{head!} is currently checked out."
       when 'log'
-        Backup.order(:number).all.reverse.each do |b|
-          puts "Backup #{b[:number]} => #{b[:message] or "<NO MESSAGE>"} (#{b[:created]})"
+        backups = Backup.order(:number).all.reverse
+        groups = []
+        until backups.empty?
+          latest = backups.shift
+          parent = latest[:parent]
+          ancestor_numbers = []
+          while parent
+            ancestor_numbers << parent
+            parent = Backup[number: parent][:parent]
+          end
+
+          ancestors, other = backups.partition { |bu| ancestor_numbers.include? bu[:number] }
+          groups << [latest, *ancestors]
+          backups = other
         end
+        puts groups.map { |group|
+          group.map { |b|
+            "Backup #{b[:number]} <= #{b[:parent] or 'ROOT'} :: #{b[:message] or "<NO MESSAGE>"} (#{b[:created]})"
+          }.join("\n")
+        }.join("\n\n")
       when 'diff'
         lhs = path_to ARGV[1]
         rhs = (ARGV[2] and path_to ARGV[2]) || '.'
