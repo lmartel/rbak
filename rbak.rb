@@ -17,6 +17,18 @@ module RBak
       '.rbak'
     end
 
+    def head_path
+      path_to 'HEAD'
+    end
+
+    def head
+      File.read(head_path).to_i
+    end
+
+    def write_head!(num)
+      File.write(head_path, num)
+    end
+
     def path_to(*args)
       "#{base_path}/#{args.join('/')}"
     end
@@ -41,17 +53,18 @@ module RBak
     include Helpers
 
     def backup(m = nil)
-      num = (Backup.insert created: Time.now, message: m).to_s
+      num = Backup.insert created: Time.now, message: m
       files = Dir.foreach('.').reject { |f| ['.', '..', base_path].include? f }
 
       FileUtils.mkdir_p path_to(num)
       files.each do |f|
         FileUtils.cp_r f, path_to(num)
       end
+      num
     end
 
     def checkout(num)
-      FileUtils.cp_r path_to(num, '*'), '.'
+      FileUtils.cp_r path_to(num, '.'), '.'
     end
 
     def setup
@@ -64,10 +77,16 @@ module RBak
       case ARGV.first
       when 'backup'
         msg = ARGV[ARGV.index('-m') + 1] if ARGV.include? '-m'
-        backup msg
+        num = backup msg
+        write_head! num
       when 'checkout'
         num = ARGV[1].to_i
         checkout num
+        write_head! num
+      when 'latest'
+        num = Backup.order(:number).last[:number]
+        checkout num
+        write_head! num
       else
         puts "Usage: rbak COMMAND"
         puts "Valid commands: 'backup', 'checkout', 'latest', 'log'"
@@ -75,6 +94,6 @@ module RBak
     end
   end
 
-  end
+end
 
-  RBak::Main.new.main
+RBak::Main.new.main
